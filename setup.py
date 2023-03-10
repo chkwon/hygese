@@ -1,6 +1,10 @@
 from setuptools import setup, find_packages
 from setuptools.command.build_ext import build_ext as _build_ext
 from setuptools.command.build_py import build_py as _build_py
+
+from distutils.core import setup, Extension
+from Cython.Build import cythonize
+
 import subprocess
 import os
 import platform
@@ -10,13 +14,6 @@ import shutil
 import urllib.request
 
 urlretrieve = urllib.request.urlretrieve
-
-# try:
-#     import urllib.request
-#     urlretrieve = urllib.request.urlretrieve
-# except ImportError:  # python 2
-#     from urllib import urlretrieve
-
 
 # read the contents of your README file
 from pathlib import Path
@@ -40,10 +37,8 @@ def _safe_makedirs(*paths):
 HGS_VERSION = "2.0.0"
 HGS_SRC = f"https://github.com/vidalt/HGS-CVRP/archive/v{HGS_VERSION}.tar.gz"
 
-LIB_DIR = "lib"
-BUILD_DIR = "lib/build"
-BIN_DIR = "lib/bin"
-
+DEPS_DIR = "deps"
+BUILD_DIR = "deps/build"
 
 def get_lib_filename():
     if platform.system() == "Linux":
@@ -54,59 +49,68 @@ def get_lib_filename():
         lib_ext = "dll"
     else:
         lib_ext = "so"
+        
     return f"libhgscvrp.{lib_ext}"
 
 
-LIB_FILENAME = get_lib_filename()
+# LIB_FILENAME = get_lib_filename()
+LIB_FILENAME = "libhgscvrp.a"
+
+
+def convert_shared_to_static():
+    with open(f"{DEPS_DIR}/HGS-CVRP-{HGS_VERSION}/CMakeLists.txt", "r") as f:
+        lines = f.read()
+        
+    new_lines = lines.replace("SHARED", "STATIC")
+    
+    with open(f"{DEPS_DIR}/HGS-CVRP-{HGS_VERSION}/CMakeLists.txt", "w") as f:
+        f.write(new_lines)
+        f.write("\n")
+        f.write("set(CMAKE_POSITION_INDEPENDENT_CODE ON)")
 
 
 def download_build_hgs():
-    _safe_makedirs(LIB_DIR)
+    _safe_makedirs(DEPS_DIR)
     _safe_makedirs(BUILD_DIR)
     hgs_src_tarball_name = "{}.tar.gz".format(HGS_VERSION)
-    hgs_src_path = pjoin(LIB_DIR, hgs_src_tarball_name)
+    hgs_src_path = pjoin(DEPS_DIR, hgs_src_tarball_name)
     urlretrieve(HGS_SRC, hgs_src_path)
-    _run(f"tar xzvf {hgs_src_tarball_name}", LIB_DIR)
+    _run(f"tar xzvf {hgs_src_tarball_name}", DEPS_DIR)
+    convert_shared_to_static()
     _run(
         f'cmake -DCMAKE_BUILD_TYPE=Release -G "Unix Makefiles" ../HGS-CVRP-{HGS_VERSION}',
         BUILD_DIR,
     )
     _run("make lib", BUILD_DIR)
 
-    shutil.copyfile(f"{BUILD_DIR}/{LIB_FILENAME}", f"hygese/{LIB_FILENAME}")
-
-
-# LIB_VERSION = "0.0.1"
-# HGS_CVRP_WIN = f"https://github.com/chkwon/Libhgscvrp_jll.jl/releases/download/libhgscvrp-v{LIB_VERSION}%2B0/" + \
-#                 f"libhgscvrp.v{LIB_VERSION}.x86_64-w64-mingw32-cxx11.tar.gz"
-
-# def download_binary_hgs():
-#     print(HGS_CVRP_WIN)
-
-#     _safe_makedirs(LIB_DIR)
-#     dll_tarball_name = "win_bin.tar.gz"
-#     hgs_bin_path = pjoin(LIB_DIR, dll_tarball_name)
-#     urlretrieve(HGS_CVRP_WIN, hgs_bin_path)
-#     _run(f"tar xzvf {dll_tarball_name}", LIB_DIR)
-#     shutil.copyfile(f"{BIN_DIR}/{LIB_FILENAME}", f"hygese/{LIB_FILENAME}")
-
+    # shutil.copyfile(f"{BUILD_DIR}/{LIB_FILENAME}", f"hygese/{LIB_FILENAME}")
+    
 
 class BuildPyCommand(_build_py):
     def run(self):
-        print("Build!!!!!! Run!!!!")
-
-        if platform.system() == "Windows":
-            # download_binary_hgs()
-            download_build_hgs()
-        else:
-            download_build_hgs()
-
+        download_build_hgs()
         _build_py.run(self)
+
+
+
+extentions = [
+    Extension(
+        name="hygese.wrapper",
+        sources=["hygese/wrapper.pyx"],
+        include_dirs = [f"deps/HGS-CVRP-{HGS_VERSION}/Program/"],
+        language="c",
+        # library_dirs = ["hygese"],
+        # libraries = ["hgscvrp"],
+        extra_objects = [f"{BUILD_DIR}/{LIB_FILENAME}"]
+    )
+]
+
+
 
 
 setup(
     name="hygese",
-    version="0.0.0.8",
+    version="0.0.1.0",
     description="A Python wrapper for the HGS-CVRP solver",
     long_description=long_description,
     long_description_content_type="text/markdown",
@@ -127,8 +131,14 @@ setup(
     cmdclass={
         "build_py": BuildPyCommand,
     },
-    package_data={
-        "": ["libhgscvrp.*"],
-    },
-    install_requires=["numpy"],
+    ext_modules=cythonize(extentions),    
+    # data_files=[("lib", [f"hygese/{LIB_FILENAME}"])],
+    # include_package_data=True,    
+    # package_data={
+    #     "": ["libhgscvrp.*"],
+    # },
+    install_requires=[
+        "Cython>=0.29.0",
+        "numpy>=1.23.0",
+    ],
 )

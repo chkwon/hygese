@@ -1,9 +1,13 @@
+deps/
+wrapper.c
+
 build_tmp/
 .idea
 *.dylib
 *.so
 *.dll
 *.dll.a
+*.a
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
